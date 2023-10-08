@@ -1,0 +1,203 @@
+version: '3.8'
+
+services:
+  nginx:
+    hostname: nginx
+    container_name: nginx_container
+    build: ./requirements/nginx/
+    image: nginx:nginx-alpine #tag, version-history
+    depends_on:
+      - wordpress
+    env_file:
+      - .env
+    init: true #if this not specified, mariadb mysqld daemon process will have PID 1, will not be able to manage signals correctly from the host
+    ports:
+      - 443:443 # http def port
+    volumes: #To share the /var/www/html directory between nginx and php-fpm containers, you can use Docker volumes.
+      - wordpress-data:/var/www/html/
+      # - php-fpm-socket:/var/run/
+    restart: on-failure #restart containers only if they exit with a non-zero exit code
+    networks:
+      - inception
+
+  wordpress:
+    hostname: wordpress
+    container_name: wordpress_container
+    build:
+      context: ./requirements/wordpress/
+      args:
+        - WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST}
+        - WORDPRESS_URL=${WORDPRESS_URL}
+        - WORDPRESS_TITLE=${WORDPRESS_TITLE}
+        - WORDPRESS_ADMIN_USER=${WORDPRESS_ADMIN_USER}
+        - WORDPRESS_ADMIN_PASSWORD=${WORDPRESS_ADMIN_PASSWORD}
+        - WORDPRESS_ADMIN_EMAIL=${WORDPRESS_ADMIN_EMAIL}
+        - WORDPRESS_USER=${WORDPRESS_USER}
+        - WORDPRESS_EMAIL=${WORDPRESS_EMAIL}
+        - WORDPRESS_PASSWORD=${WORDPRESS_PASSWORD}
+        - MYSQL_DATABASE=${MYSQL_DATABASE}
+        - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+        - MYSQL_USER=${MYSQL_USER}
+        - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    image: wordpress:wordpress-alpine
+    depends_on:
+      - mariadb
+    env_file:
+      - .env
+    init: true #if this not specified, mariadb mysqld daemon process will have PID 1, will not be able to manage signals correctly from the host
+    volumes:
+      - wordpress-data:/var/www/html/
+      # - php-fpm-socket:/var/run/
+    restart: on-failure
+    networks:
+      - inception
+    expose: #expose the port only to the containers on the same network but not the host machine
+      - 9000 # PHP-FPM default port
+
+  mariadb:
+    hostname: mariadb
+    container_name: mariadb_container
+    build:
+      context: ./requirements/mariadb/
+      args:
+        - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+        - MYSQL_DATABASE=${MYSQL_DATABASE}
+        - MYSQL_USER=${MYSQL_USER}
+        - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    image: mariadb:mariadb-alpine
+    env_file:
+      - .env
+    init: true #if this not specified, mariadb mysqld daemon process will have PID 1, will not be able to manage signals correctly from the host
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    restart: on-failure
+    networks:
+      - inception
+    expose: # default Mariadb port
+      - 3306
+
+  adminer:
+    hostname: adminer
+    container_name: adminer_container
+    build: ./requirements/bonus/adminer/
+    image: adminer:adminer-alpine
+    depends_on:
+      - mariadb
+    env_file:
+      - .env
+    init: true
+    volumes:
+      - adminer-data:/var/www/html/
+    restart: on-failure
+    networks:
+      - inception
+    expose:
+      - 9000 # PHP-FPM default port
+
+  redis:
+    hostname: redis
+    container_name: redis_container
+    build: ./requirements/bonus/redis/
+    image: redis:redis-alpine
+    depends_on:
+      - wordpress
+    env_file:
+      - .env
+    init: true
+    restart: on-failure
+    networks:
+      - inception
+    expose:
+      - 6379 # redis default port
+
+  ftp:
+    hostname: ftp
+    container_name: ftp_container
+    build:
+      context: ./requirements/bonus/ftp/
+      args:
+        - FTP_USER=${FTP_USER}
+        - FTP_PASS=${FTP_PASS}
+    image: ftp:ftp-alpine
+    depends_on:
+      - wordpress
+    env_file:
+      - .env
+    init: true
+    volumes:
+      - wordpress-data:/var/www/html/:rw
+    restart: on-failure
+    networks:
+      - inception
+    ports:
+      - 21:21 # default port # netstat -plant | grep :21
+
+  portainer:
+    hostname: portainer
+    container_name: portainer_container
+    build: ./requirements/bonus/portainer/
+    image: portainer:portainer-alpine
+    depends_on:
+      - nginx
+    env_file:
+      - .env
+    init: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    restart: on-failure
+    networks:
+      - inception
+    ports:
+      - 9443:9443
+
+  website:
+    hostname: website
+    container_name: website_container
+    build: ./requirements/bonus/portfolio/
+    image: website:website-alpine
+    depends_on:
+      - nginx
+    init: true
+    restart: on-failure
+    networks:
+      - inception
+    ports:
+      - 4173:4173
+
+networks:
+  inception: #label
+    name: inception #name
+    driver: bridge # a local private network with each service has its IP, Containers connected to the same bridge network can communicate with each other using IP addresses or hostnames
+
+volumes:
+  mariadb-data: #bind mount
+    name: mariadb-data
+    driver: local
+    driver_opts:
+      device: /home/adouib/data/mariadb-data
+      o: bind
+      type: none
+  wordpress-data:
+    name: wordpress-data
+    driver: local
+    driver_opts:
+      device: /home/adouib/data/wordpress-data
+      o: bind
+      type: none
+  adminer-data:
+    name: adminer-data
+    driver: local
+    driver_opts:
+      device: /home/adouib/data/adminer-data
+      o: bind
+      type: none
+  portainer-data:
+    name: portainer-data
+    driver: local
+    driver_opts:
+      device: /home/adouib/data/portainer-data
+      o: bind
+      type: none
+  # php-fpm-socket:  #named volume # share the Unix socket between the Nginx and PHP-FPM containers
+
